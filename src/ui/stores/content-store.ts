@@ -76,6 +76,10 @@ import {
   isPackAccessDenied,
   isPackLeaseNearExpiry,
 } from '../lib/pack-lease-scheduler';
+import {
+  findSavesLockedElsewhere,
+  PACK_ROLLBACK_SAVES_RESTORED_NOTICE,
+} from '../lib/save-tab-lock';
 import { detach } from './db-write';
 import type { ContentStatus } from '@engine/types/types-content';
 // 占位基线清单：随引擎打包的静态资源（设计 §6），**不是**内容树的一部分。
@@ -1282,8 +1286,36 @@ export const useContentStore = defineStore('content', () => {
    * 新 pack 行未落库，`importAllData(snapshot)` 就能把 worldBooks / presets 等
    * 全部还原到装前状态（reconcilePackState 读到无 pack → 无对账）。
    */
-  async function rollbackTo(snapshot: Awaited<ReturnType<typeof exportAllData>>): Promise<void> {
+  async function rollbackTo(
+    snapshot: Awaited<ReturnType<typeof exportAllData>>,
+    err: unknown,
+  ): Promise<unknown> {
+    // 📌 2026-11-27（L2）：还原前再试探一次存档锁。入口预检之后别的标签页仍可能进档；
+    //    此时**仍整库还原**（不做范围化回滚），只在抛出的错误文案里追加提醒。
+    const lockedElsewhere = (await findSavesLockedElsewhere()).length > 0;
     await importAllData(snapshot);
+    if (!lockedElsewhere) return err;
+    // 构造新错误、不改原对象：DOMException 等的 message 是只读访问器，赋值会抛 TypeError，
+    // 调用方随后的内存恢复与 wb.hydrate() 就被跳过、原始错误也丢了。原错误挂在 cause 上。
+    const original =
+      err instanceof Error
+        ? err.name && err.name !== 'Error'
+          ? `${err.name}: ${err.message}`
+          : err.message
+        : String(err);
+    const wrapped: Error & { cause?: unknown } = new Error(
+      `${original}（${PACK_ROLLBACK_SAVES_RESTORED_NOTICE}）`,
+    );
+    wrapped.cause = err;
+    return wrapped;
+  }
+
+  /**
+   * 装 / 升 / 卸前的存档锁试探（2026-11-27，L2）：别的标签页正占着存档时返回 true，调用方零写入拒绝。
+   * 🔴 必须在 `execBusy` 同步置位**之后**、try/finally 之内调用（COR-07）。
+   */
+  async function savesLockedElsewhere(): Promise<boolean> {
+    return (await findSavesLockedElsewhere()).length > 0;
   }
 
   /** 有没有任何分节 planner 标了 conflicted（两阶段提交第一段判定） */
@@ -1579,9 +1611,17 @@ export const useContentStore = defineStore('content', () => {
         packVersion: envelope.packVersion,
       };
     execBusy = true;
-    const epoch = ++generation,
-      revision = discordAuthRevision.value;
     try {
+      // 存档锁试探放在世代号前进之前：被拒时不打断在途的续期
+      if (await savesLockedElsewhere())
+        return {
+          ok: false,
+          status: 'saves_in_use',
+          packId: envelope.packId,
+          packVersion: envelope.packVersion,
+        };
+      const epoch = ++generation,
+        revision = discordAuthRevision.value;
       const pack = await decryptContentPackAtRuntime(
         envelope,
         keyLease,
@@ -1693,11 +1733,14 @@ export const useContentStore = defineStore('content', () => {
     if (!row) return { ok: false, status: 'no_pack' };
     if (execBusy) return { ok: false, status: 'busy' };
     execBusy = true;
-    generation++;
-    scheduler.stop();
-    // Unmount synchronously, before the first disk await or any late renewal response.
-    lockActivePack();
     try {
+      // 📌 2026-11-27（L2）：存档锁试探排在卸下之前 —— 被拒时内存里的包原样保留、零写入。
+      //    试探期间 execBusy 已置位，调度器不会再发起新的续期（canRenew 判 !execBusy）。
+      if (await savesLockedElsewhere()) return { ok: false, status: 'saves_in_use' };
+      generation++;
+      scheduler.stop();
+      // Unmount synchronously, before the first disk await or any late renewal response.
+      lockActivePack();
       await purgeProtectedPackPlaintext();
       await getDatabase().contentPacks.delete(row.packId);
       savePackKeyLease(null);
@@ -1758,6 +1801,14 @@ export const useContentStore = defineStore('content', () => {
     // —— 一次失败的安装回滚能把另一次已经提交的卸载连同存档一起退回去。
     execBusy = true;
     try {
+      if (await savesLockedElsewhere())
+        return {
+          ok: false,
+          status: 'saves_in_use',
+          packId: String((rawPack as ContentPack).packId ?? ''),
+          packVersion: String((rawPack as ContentPack).packVersion ?? ''),
+          validationErrors: [],
+        };
       const pack = detach(rawPack) as ContentPack;
       // 已装同 id → 用旧包 payload 现算基线（D18 hash 分工：冲突判定从 payload 现算）。
       // 升级的 diff 展示由 upgradePack 单独提供（UI 层按 packId 分流）；installPack 本身
@@ -1827,7 +1878,7 @@ export const useContentStore = defineStore('content', () => {
             await db.contentPacks.put(previousRecord);
           });
         }
-        await rollbackTo(snapshot);
+        const thrown = await rollbackTo(snapshot, err);
         if (previousRecord?.encryptedEnvelope) {
           setActivePackRecord(previousRecord);
           syncPackMetadata(previousRecord);
@@ -1852,7 +1903,7 @@ export const useContentStore = defineStore('content', () => {
           leaseState.value = previousRecord?.source === 'legacy-locked' ? 'LOCKED_LEGACY' : 'LOCAL';
         }
         await (await useWbStore()).hydrate();
-        throw err;
+        throw thrown;
       }
     } finally {
       // 每一条出口都要放锁：needs_confirmation 早退（UI 稍后带确认重入）、
@@ -1885,6 +1936,16 @@ export const useContentStore = defineStore('content', () => {
       };
     }
     const pack = detach(rawPack) as ContentPack;
+    // 📌 2026-11-27（L2）：先试探存档锁，免得玩家确认完升级 diff 才被拒。
+    //    这里没有 execBusy 置位（升级本身不写库，落盘委托给 installPack，那里在锁内会再试探一次）。
+    if (await savesLockedElsewhere())
+      return {
+        ok: false,
+        status: 'saves_in_use',
+        packId: pack.packId,
+        packVersion: pack.packVersion,
+        validationErrors: [],
+      };
     const existing = await getDatabase().contentPacks.get(pack.packId);
     if (!existing) {
       // 没装过同 id → 不是升级，走安装
@@ -1952,6 +2013,7 @@ export const useContentStore = defineStore('content', () => {
     if (!installedPack) return { ok: false, status: 'no_pack' };
     execBusy = true;
     try {
+      if (await savesLockedElsewhere()) return { ok: false, status: 'saves_in_use' };
       const packBaseline = buildPackBaseline(installedPack);
       const current = await buildCurrentLibrary();
       const plan = planPackUninstall(installedPack, current, packBaseline);
@@ -2033,8 +2095,7 @@ export const useContentStore = defineStore('content', () => {
           installedPack.packId,
           err,
         );
-        await rollbackTo(snapshot);
-        throw err;
+        throw await rollbackTo(snapshot, err);
       }
     } catch (err) {
       throw err;
@@ -2129,7 +2190,8 @@ export const useContentStore = defineStore('content', () => {
 /** 安装/升级结果（两阶段提交各段共用） */
 export interface PackInstallOutcome {
   ok: boolean;
-  status: 'invalid' | 'needs_confirmation' | 'busy' | 'installed';
+  /** `saves_in_use`：有存档被别的标签页占着（2026-11-27，L2），零写入拒绝 */
+  status: 'invalid' | 'needs_confirmation' | 'busy' | 'saves_in_use' | 'installed';
   packId: string;
   packVersion: string;
   plan?: PackInstallPlan;
@@ -2143,7 +2205,8 @@ export interface PackInstallOutcome {
 export interface PackUninstallOutcome {
   ok: boolean;
   /** `busy`：另一次装/卸正在进行（COR-07；与 PackInstallOutcome 的同名状态同义） */
-  status: 'no_pack' | 'needs_confirmation' | 'uninstalled' | 'busy';
+  /** `saves_in_use`：有存档被别的标签页占着（2026-11-27，L2），零写入拒绝 */
+  status: 'no_pack' | 'needs_confirmation' | 'uninstalled' | 'busy' | 'saves_in_use';
   plan?: PackUninstallPlan;
   notes?: WorkshopNote[];
 }

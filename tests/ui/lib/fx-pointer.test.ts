@@ -2,11 +2,12 @@
  * fx-pointer.ts — 指针源与视差
  *
  * 守的是：至多一个监听、惰性挂载、无订阅即摘；无悬停设备零监听；
+ * 可悬停判据读 `(any-hover: hover)`（混合输入设备主输入是触摸也照挂），触摸移动不派发；
  * 视差收敛后停帧、只写元素自己的 transform、注销时清掉。
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createPointerHub } from '../../../src/ui/lib/fx-pointer';
 import type { FrameCallback } from '../../../src/ui/lib/fx-ticker';
 
@@ -22,8 +23,8 @@ function fakeTarget() {
       listeners.delete(l);
     }),
     count: () => listeners.size,
-    move(clientX: number, clientY: number) {
-      const ev = Object.assign(new Event('pointermove'), { clientX, clientY });
+    move(clientX: number, clientY: number, pointerType = 'mouse') {
+      const ev = Object.assign(new Event('pointermove'), { clientX, clientY, pointerType });
       for (const l of Array.from(listeners)) l(ev);
     },
   };
@@ -78,6 +79,60 @@ describe('subscribePointer', () => {
     const off = hub.subscribePointer(vi.fn());
     expect(target.addEventListener).not.toHaveBeenCalled();
     off();
+  });
+});
+
+/** 按查询串应答的 matchMedia 替身：只有列出的查询为真 */
+function stubMatchMedia(trueQueries: string[]) {
+  const mm = vi.fn((query: string) => ({ matches: trueQueries.includes(query), media: query }));
+  vi.stubGlobal('matchMedia', mm);
+  return mm;
+}
+
+describe('缺省可悬停判据（any-hover + 指针类型）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('主输入不可悬停但 any-hover 为真（触屏笔记本接鼠标）：订阅生效，鼠标移动派发、触摸移动不派发', () => {
+    const mm = stubMatchMedia(['(any-hover: hover)']);
+    const target = fakeTarget();
+    const hub = createPointerHub({ target: target as never });
+    const cb = vi.fn();
+    const off = hub.subscribePointer(cb);
+    expect(mm).toHaveBeenCalledWith('(any-hover: hover)');
+    expect(hub.isListening()).toBe(true);
+    expect(target.addEventListener).toHaveBeenCalledTimes(1);
+
+    target.move(50, 50, 'touch');
+    expect(cb).not.toHaveBeenCalled();
+    target.move(200, 0, 'mouse');
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith({ x: 200, y: 0, nx: 1, ny: -1 });
+    target.move(100, 50, 'pen');
+    expect(cb).toHaveBeenCalledTimes(2);
+
+    off();
+    expect(hub.isListening()).toBe(false);
+    expect(target.count()).toBe(0);
+  });
+
+  it('纯触屏（any-hover 为假）：不挂任何监听', () => {
+    stubMatchMedia([]);
+    const target = fakeTarget();
+    const hub = createPointerHub({ target: target as never });
+    const off = hub.subscribePointer(vi.fn());
+    expect(target.addEventListener).not.toHaveBeenCalled();
+    expect(hub.isListening()).toBe(false);
+    off();
+  });
+
+  it('只认 any-hover：仅 `(hover: hover)` 为真的替身不算可悬停', () => {
+    stubMatchMedia(['(hover: hover)']);
+    const target = fakeTarget();
+    const hub = createPointerHub({ target: target as never });
+    hub.subscribePointer(vi.fn());
+    expect(target.addEventListener).not.toHaveBeenCalled();
   });
 });
 

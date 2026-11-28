@@ -5,11 +5,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { flushPromises, shallowMount, type VueWrapper } from '@vue/test-utils';
 import HomePage from '../../../../src/ui/components/home/HomePage.vue';
+import HomeOnboarding from '../../../../src/ui/components/home/HomeOnboarding.vue';
 import { useWorkshopStore } from '../../../../src/ui/stores/workshop-store';
+import { useSettingsStore } from '../../../../src/ui/stores/settings-store';
+import { useContentStore } from '../../../../src/ui/stores/content-store';
+import { useApiSourceStore } from '../../../../src/ui/stores/api-source-store';
 
 /** 取被替身的工坊 store（响应式），按替身形状读写 */
 function workshopMock(): { ready: boolean; projects: Array<{ id: string }> } {
   return useWorkshopStore() as unknown as { ready: boolean; projects: Array<{ id: string }> };
+}
+
+/** 取被替身的设置 / 内容 / API 源 store（响应式） */
+function settingsMock(): { apiPool: unknown[]; onboardingDismissed: boolean } {
+  return useSettingsStore().settings as unknown as {
+    apiPool: unknown[];
+    onboardingDismissed: boolean;
+  };
+}
+function contentMock(): { contentStatus: string; activePackId: string | null } {
+  return useContentStore() as unknown as { contentStatus: string; activePackId: string | null };
+}
+function apiSourcesMock(): { initialized: boolean } {
+  return useApiSourceStore() as unknown as { initialized: boolean };
 }
 
 const mocks = vi.hoisted(() => ({
@@ -37,7 +55,20 @@ const mocks = vi.hoisted(() => ({
     toast: vi.fn(),
   },
   settings: {
-    settings: { activePresetId: null },
+    settings: {
+      activePresetId: null,
+      apiPool: [] as unknown[],
+      onboardingDismissed: false,
+    },
+  },
+  content: {
+    contentStatus: 'placeholder' as string,
+    activePackId: null as string | null,
+    hydratePackState: vi.fn<() => Promise<void>>(),
+  },
+  apiSources: {
+    initialized: true,
+    initialize: vi.fn<() => Promise<void>>(),
   },
   workshop: {
     ready: true,
@@ -61,9 +92,21 @@ vi.mock('../../../../src/ui/stores/workshop-store', async () => {
   const store = reactive(mocks.workshop);
   return { useWorkshopStore: () => store };
 });
-vi.mock('../../../../src/ui/stores/settings-store', () => ({
-  useSettingsStore: () => mocks.settings,
-}));
+vi.mock('../../../../src/ui/stores/settings-store', async () => {
+  const { reactive } = await import('vue');
+  const store = reactive(mocks.settings);
+  return { useSettingsStore: () => store };
+});
+vi.mock('../../../../src/ui/stores/content-store', async () => {
+  const { reactive } = await import('vue');
+  const store = reactive(mocks.content);
+  return { useContentStore: () => store };
+});
+vi.mock('../../../../src/ui/stores/api-source-store', async () => {
+  const { reactive } = await import('vue');
+  const store = reactive(mocks.apiSources);
+  return { useApiSourceStore: () => store };
+});
 vi.mock('@engine/index', () => ({ VERSION: 'test' }));
 vi.mock('@engine/persistence/database', () => mocks.database);
 vi.mock('../../../../src/ui/branding-defaults', async () => {
@@ -125,6 +168,15 @@ beforeEach(() => {
   mocks.database.saveSaveSlot.mockReset().mockResolvedValue('save-1');
   mocks.database.deleteSaveSlot.mockReset().mockResolvedValue(undefined);
   mocks.database.getPresets.mockReset().mockResolvedValue([]);
+  const settings = settingsMock();
+  settings.apiPool = [];
+  settings.onboardingDismissed = false;
+  const content = contentMock();
+  content.contentStatus = 'placeholder';
+  content.activePackId = null;
+  mocks.content.hydratePackState.mockReset().mockResolvedValue();
+  apiSourcesMock().initialized = true;
+  mocks.apiSources.initialize.mockReset().mockResolvedValue();
 });
 
 afterEach(() => {
@@ -330,5 +382,111 @@ describe('HomePage 次级入口布局', () => {
 
     expect(close).toHaveBeenCalledOnce();
     close.mockRestore();
+  });
+});
+
+const usableLlm = {
+  id: 'chat',
+  name: 'Local',
+  baseUrl: 'http://localhost:1234/v1',
+  model: 'local-model',
+  apiType: 'chat',
+};
+
+function onboarding(home: VueWrapper) {
+  return home.findComponent(HomeOnboarding);
+}
+
+describe('HomePage 开始前的三步', () => {
+  it('新玩家（三份数据都读完、什么都没做）自动展开，且挂在按钮列之外', async () => {
+    const home = await mountHome();
+    const panel = onboarding(home);
+
+    expect(panel.props('state')).toBe('expanded');
+    expect(panel.props('model').doneCount).toBe(0);
+    expect(home.get('.btn-column').findComponent(HomeOnboarding).exists()).toBe(false);
+    expect(mocks.content.hydratePackState).toHaveBeenCalled();
+    expect(mocks.apiSources.initialize).toHaveBeenCalled();
+  });
+
+  it('内容态、API 源或存档还在读取时不出现（不闪现）', async () => {
+    let resolveContent: () => void = () => {};
+    mocks.content.hydratePackState.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveContent = resolve;
+      }),
+    );
+    apiSourcesMock().initialized = false;
+    const home = await mountHome();
+    expect(onboarding(home).props('state')).toBe('hidden');
+
+    resolveContent();
+    await flushPromises();
+    expect(onboarding(home).props('state')).toBe('hidden');
+
+    apiSourcesMock().initialized = true;
+    await flushPromises();
+    expect(onboarding(home).props('state')).toBe('expanded');
+  });
+
+  it('读内容态失败按已读完处理，面板照常出现', async () => {
+    mocks.content.hydratePackState.mockRejectedValue(new Error('读库失败'));
+    const home = await mountHome();
+
+    expect(onboarding(home).props('state')).toBe('expanded');
+  });
+
+  it('三个直达按钮：内容包 / API 去对应设置分区，存档走新建存档', async () => {
+    const home = await mountHome();
+    const panel = onboarding(home);
+
+    panel.vm.$emit('go', 'content');
+    panel.vm.$emit('go', 'api');
+    panel.vm.$emit('go', 'save');
+
+    expect(mocks.ui.openSettings.mock.calls).toEqual([['content-pack'], ['api']]);
+    expect(mocks.ui.navigate).toHaveBeenCalledWith('create');
+  });
+
+  it('关闭后收起、重新打开后展开；「不再显示」写偏好并清掉手动选择', async () => {
+    const home = await mountHome();
+
+    onboarding(home).vm.$emit('close');
+    await flushPromises();
+    expect(onboarding(home).props('state')).toBe('collapsed');
+
+    onboarding(home).vm.$emit('open');
+    await flushPromises();
+    expect(onboarding(home).props('state')).toBe('expanded');
+
+    onboarding(home).vm.$emit('dismiss');
+    await flushPromises();
+    expect(settingsMock().onboardingDismissed).toBe(true);
+    expect(onboarding(home).props('state')).toBe('collapsed');
+
+    onboarding(home).vm.$emit('open');
+    await flushPromises();
+    expect(onboarding(home).props('state')).toBe('expanded');
+  });
+
+  it('点过「不再显示」的玩家只看到收起入口', async () => {
+    settingsMock().onboardingDismissed = true;
+    const home = await mountHome();
+
+    expect(onboarding(home).props('state')).toBe('collapsed');
+  });
+
+  it('必需步（API + 存档）都满足时自动收起，三步全完成时连入口一起隐藏', async () => {
+    settingsMock().apiPool = [usableLlm];
+    mocks.game.saves.push({ id: 'save-1', updatedAt: 1 });
+    const home = await mountHome();
+    expect(onboarding(home).props('state')).toBe('collapsed');
+    expect(onboarding(home).props('model').doneCount).toBe(2);
+
+    const content = contentMock();
+    content.contentStatus = 'pack';
+    content.activePackId = 'fated-poem';
+    await flushPromises();
+    expect(onboarding(home).props('state')).toBe('hidden');
   });
 });

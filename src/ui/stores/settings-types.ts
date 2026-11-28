@@ -254,6 +254,11 @@ export type UiSettings = {
   reducedMotion: boolean;
   /** 首页 Astral Drift 动态背景；减动效开启时此值不生效且不会加载 WebGL 场景 */
   homeBackdrop: boolean;
+  /**
+   * 首页「开始前的三步」引导：玩家点过「不再显示」。只记这一项偏好，
+   * 各步完成与否全由真实状态推导（`lib/onboarding.ts`），不持久化。
+   */
+  onboardingDismissed: boolean;
   /** 界面特效（光泽、粒子、视差等装饰层）；任一减动效来源为真时不生效，见 lib/fx-gate.ts */
   visualEffects: boolean;
   /**

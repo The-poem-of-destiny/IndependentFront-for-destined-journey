@@ -319,6 +319,9 @@ function getDefaults(): UiSettings {
     // 首页 Astral Drift 动态背景。默认开；WebGL2 不可用或任一减动效来源为真时自动退回静态首页。
     homeBackdrop: true,
 
+    // 首页「开始前的三步」引导的「不再显示」。默认 false；完成状态不在这里存，见 lib/onboarding.ts。
+    onboardingDismissed: false,
+
     // 界面特效（装饰层）。默认开；减动效（系统偏好或应用内开关）为真时整层不挂载。
     // 闸门唯一写入点见 lib/fx-gate.ts。
     visualEffects: true,

@@ -22,7 +22,12 @@ import {
   resetPlaceholderHashesCache,
   setPlaceholderHashesForTests,
 } from '../../../src/ui/stores/content-store';
+import { useWorldBookStore } from '../../../src/ui/stores/worldbook-store';
 import { getDatabase } from '@engine/persistence/database';
+import {
+  acquireSaveTabLock,
+  PACK_ROLLBACK_SAVES_RESTORED_NOTICE,
+} from '../../../src/ui/lib/save-tab-lock';
 import { hashWorldBook } from '@engine/content/content-source';
 import type { WorldBook, WorldBookEntry } from '@engine/types/types';
 import type { ContentPack } from '@engine/types/types-content';
@@ -655,5 +660,157 @@ describe('content-store 执行器 —— 6. D42 重播种', () => {
     expect(ws?.entries[0].content).toBe('用户自己改过的内容');
     // 戳已更新
     expect(cfg.settings.placeholderVersion).toBe('2');
+  });
+});
+
+// 📌 2026-11-27（L2）：装 / 升 / 卸失败时整库还原，会把别的标签页正在玩的存档一起退回去 ——
+// 所以写入前试探 Web Locks，被别的标签页占着就零写入拒绝；回滚前再试探一次，命中仍还原但在错误里提醒。
+describe('content-store 执行器 —— 7. 装 / 升 / 卸前试探存档标签页锁（L2）', () => {
+  /** 假 navigator.locks：`held` 里是别的标签页占着的锁名，本标签页申请的锁也记在同一集合 */
+  function installFakeLocks(external: string[] = []): Set<string> {
+    const held = new Set<string>(external);
+    const locks = {
+      request: vi.fn(
+        async (name: string, _options: LockOptions, callback: (lock: Lock | null) => unknown) => {
+          if (held.has(name)) return await callback(null);
+          held.add(name);
+          try {
+            return await callback({ name, mode: 'exclusive' } as Lock);
+          } finally {
+            held.delete(name);
+          }
+        },
+      ),
+      query: vi.fn(async () => ({
+        held: [...held].map((name) => ({ name, mode: 'exclusive', clientId: 'x' })),
+        pending: [],
+      })),
+    };
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+    return held;
+  }
+
+  /** 库里几张表的指纹（判「零写入」用） */
+  async function libraryFingerprint(): Promise<string> {
+    const db = getDatabase();
+    return JSON.stringify({
+      packs: await db.contentPacks.toArray(),
+      books: await db.worldBooks.toArray(),
+      presets: await db.presets.toArray(),
+      saves: await db.saves.toArray(),
+    });
+  }
+
+  beforeEach(async () => {
+    setActivePinia(createPinia());
+    await cleanDb();
+    await seedPlaceholderLibrary();
+    installContentFetchMock();
+  });
+  afterEach(() => {
+    delete (navigator as { locks?: unknown }).locks;
+    setActivePackRecord(null);
+    resetPlaceholderHashesCache();
+    vi.restoreAllMocks();
+  });
+
+  it('别的标签页占着存档时，安装返回 saves_in_use 且库无变化', async () => {
+    installFakeLocks(['poem-save:other-tab']);
+    const before = await libraryFingerprint();
+    const c = useContentStore();
+    const outcome = await c.installPack(makePack());
+    expect(outcome.ok).toBe(false);
+    expect(outcome.status).toBe('saves_in_use');
+    expect(await libraryFingerprint()).toBe(before);
+    expect(c.contentStatus).not.toBe('pack');
+    // 锁已放开：别的标签页退出后可以照常安装
+    delete (navigator as { locks?: unknown }).locks;
+    expect((await c.installPack(makePack())).status).toBe('installed');
+  });
+
+  it('别的标签页占着存档时，升级与卸载都返回 saves_in_use 且库无变化', async () => {
+    const c = useContentStore();
+    await c.installPack(makePack());
+    installFakeLocks(['poem-save:other-tab']);
+    const before = await libraryFingerprint();
+
+    const upgraded = await c.upgradePack(makePack('2.0.0'), { confirmConflicts: true });
+    expect(upgraded.status).toBe('saves_in_use');
+    const uninstalled = await c.uninstallPack({ confirmEdits: true });
+    expect(uninstalled.ok).toBe(false);
+    expect(uninstalled.status).toBe('saves_in_use');
+
+    expect(await libraryFingerprint()).toBe(before);
+    expect(c.activePackVersion).toBe('1.0.0');
+    expect(c.contentStatus).toBe('pack');
+  });
+
+  it('本标签页自己持有的存档锁不拦', async () => {
+    installFakeLocks();
+    const own = await acquireSaveTabLock('own-save');
+    expect(own).not.toBeNull();
+    const c = useContentStore();
+    expect((await c.installPack(makePack())).status).toBe('installed');
+    expect((await c.uninstallPack({ confirmEdits: true })).status).toBe('uninstalled');
+    own!.release();
+  });
+
+  it('环境没有 navigator.locks 时放行', async () => {
+    const c = useContentStore();
+    expect((await c.installPack(makePack())).status).toBe('installed');
+  });
+
+  it('写入失败回滚时复查到别的标签页持锁：仍整库还原，错误文案追加刷新提醒', async () => {
+    const held = installFakeLocks();
+    const db = getDatabase();
+    // contentPacks.put 是安装序列最后一步；它失败的同时模拟别的标签页刚进档
+    // Dexie 的 put 返回 PromiseExtended，这里只需抛错，经 unknown 收窄类型
+    vi.spyOn(db.contentPacks, 'put').mockImplementation((async () => {
+      held.add('poem-save:late-tab');
+      throw new Error('写入失败');
+    }) as unknown as typeof db.contentPacks.put);
+    const c = useContentStore();
+    const err = await c.installPack(makePack()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe(`写入失败（${PACK_ROLLBACK_SAVES_RESTORED_NOTICE}）`);
+    // 仍整库还原：占位书回来了，没有包行
+    const sc = await db.worldBooks.get('system_core');
+    expect(sc?.entries.map((e) => e.uid)).toEqual([
+      'placeholder:system_core/core_a',
+      'placeholder:system_core/core_b',
+    ]);
+    expect(await db.contentPacks.count()).toBe(0);
+  });
+
+  it('原生 DOMException 写入失败 + 回滚复查命中锁：不改原错误，内存恢复与 hydrate 照常执行', async () => {
+    const held = installFakeLocks();
+    const db = getDatabase();
+    // DOMException 的 message 是只读访问器：旧实现给它赋值会抛 TypeError，跳过回滚后的恢复
+    const original = new DOMException('配额已满', 'QuotaExceededError');
+    vi.spyOn(db.contentPacks, 'put').mockImplementation((async () => {
+      held.add('poem-save:late-tab');
+      throw original;
+    }) as unknown as typeof db.contentPacks.put);
+    const hydrate = vi.spyOn(useWorldBookStore(), 'hydrate');
+    const c = useContentStore();
+    const err = await c.installPack(makePack()).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBe(original);
+    expect((err as Error).message).toBe(
+      `QuotaExceededError: 配额已满（${PACK_ROLLBACK_SAVES_RESTORED_NOTICE}）`,
+    );
+    expect((err as Error & { cause?: unknown }).cause).toBe(original);
+    expect(original.message).toBe('配额已满');
+    // 内存恢复照常执行：没有激活包、世界书 store 重新水合
+    expect(hydrate).toHaveBeenCalled();
+    expect(c.activePackVersion).toBeFalsy();
+    expect(await db.contentPacks.count()).toBe(0);
+  });
+
+  it('写入失败回滚时没有别的标签页持锁：错误文案原样', async () => {
+    installFakeLocks();
+    vi.spyOn(getDatabase().contentPacks, 'put').mockRejectedValue(new Error('写入失败'));
+    const c = useContentStore();
+    await expect(c.installPack(makePack())).rejects.toThrow(/^写入失败$/);
   });
 });

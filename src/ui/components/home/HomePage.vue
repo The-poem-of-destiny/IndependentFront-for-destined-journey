@@ -3,6 +3,15 @@ import { ref, computed, nextTick, onMounted, onUnmounted, defineAsyncComponent }
 import { useGameStore } from '../../stores/game-store';
 import { useUIStore } from '../../stores/ui-store';
 import { useWorkshopStore } from '../../stores/workshop-store';
+import { useContentStore } from '../../stores/content-store';
+import { useSettingsStore } from '../../stores/settings-store';
+import { useApiSourceStore } from '../../stores/api-source-store';
+import {
+  deriveOnboardingSteps,
+  resolveOnboardingPanel,
+  type OnboardingStepId,
+} from '../../lib/onboarding';
+import HomeOnboarding from './HomeOnboarding.vue';
 import { VERSION } from '@engine/index';
 import { hasExtensionWork } from '../workshop/workshop-lock';
 import AppButton from '../shared/AppButton.vue';
@@ -76,6 +85,50 @@ const showExtensionEntry = computed(() =>
 
 const savesLoaded = ref(false);
 const latestSave = computed(() => findLatestSave(game.saves));
+
+// === 开始前的三步（引导面板）===
+// 完成状态全由真实状态推导（lib/onboarding.ts）：内容包看 content-store、API 看
+// `settings.apiPool`（API 源 store 回填完才可信）、存档看存档列表。只持久化「不再显示」。
+// 任一数据还在读取时面板整个不渲染，不闪现。
+const content = useContentStore();
+const settingsStore = useSettingsStore();
+const apiSources = useApiSourceStore();
+const contentLoaded = ref(false);
+/** 本次会话里玩家的手动开合（null = 没动过，按状态自动决定）；不落存储 */
+const onboardingManualOpen = ref<boolean | null>(null);
+/** 内容态横幅：宽屏引导卡向上生长时顶边不越过它（横幅可能不渲染，取到的就不是元素） */
+const contentBanner = ref<{ $el?: unknown } | null>(null);
+const contentBannerEl = () => contentBanner.value?.$el ?? null;
+
+const onboardingModel = computed(() =>
+  deriveOnboardingSteps({
+    contentLoaded: contentLoaded.value,
+    contentStatus: content.contentStatus,
+    activePackId: content.activePackId,
+    apiLoaded: apiSources.initialized,
+    apiPool: settingsStore.settings.apiPool ?? [],
+    savesLoaded: savesLoaded.value,
+    saveCount: game.saves.length,
+  }),
+);
+const onboardingState = computed(() =>
+  resolveOnboardingPanel({
+    model: onboardingModel.value,
+    dismissed: settingsStore.settings.onboardingDismissed === true,
+    manualOpen: onboardingManualOpen.value,
+  }),
+);
+
+function onOnboardingGo(step: OnboardingStepId) {
+  if (step === 'content') ui.openSettings('content-pack');
+  else if (step === 'api') ui.openSettings('api');
+  else newGame();
+}
+
+function onOnboardingDismiss() {
+  settingsStore.settings.onboardingDismissed = true;
+  onboardingManualOpen.value = null;
+}
 // === 品牌面（D26）===
 // 标题 / 副标题 / 风味文字 / 制作人员署名与世界速览全部由内容包供给，
 // 未装包时是 branding-defaults 的中性值。这里**不留任何硬编码文案兜底** ——
@@ -104,6 +157,15 @@ onMounted(async () => {
   workshop.init().catch(() => {
     /* 失败原因记在 workshop.initError，扩展管理页会显示 */
   });
+  // 引导面板的两份前置数据：两个调用都幂等（与启动链共用同一个 Promise）。
+  // 内容态读失败按「已读完、未装包」处理；API 源读失败则保持未知，面板不出现。
+  content
+    .hydratePackState()
+    .catch(() => undefined)
+    .finally(() => {
+      contentLoaded.value = true;
+    });
+  apiSources.initialize().catch(() => undefined);
   // 加载存档列表
   try {
     await game.loadSaves();
@@ -169,7 +231,7 @@ async function startOrContinue() {
   >
     <AstralDriftBackdrop ref="backdrop" @ready="backdropReady = $event" />
     <!-- 内容态横幅（波 1 T2 / §5.8）：占位 / 检测到本地真实内容 / error -->
-    <ContentStatusBanner class="home-content-banner" />
+    <ContentStatusBanner ref="contentBanner" class="home-content-banner" />
     <!-- 装饰性背景光晕 -->
     <div class="bg-glow bg-glow-1" aria-hidden="true" />
     <div class="bg-glow bg-glow-2" aria-hidden="true" />
@@ -305,6 +367,16 @@ async function startOrContinue() {
             <component :is="DevQuickTestRow" v-if="showDevButton && DevQuickTestRow" />
           </transition>
         </div>
+        <!-- 开始前的三步：🔴 放在 .btn-column 之外（那一列的事件委托会触发背景脉冲） -->
+        <HomeOnboarding
+          :model="onboardingModel"
+          :state="onboardingState"
+          :top-guard="contentBannerEl"
+          @go="onOnboardingGo"
+          @open="onboardingManualOpen = true"
+          @close="onboardingManualOpen = false"
+          @dismiss="onOnboardingDismiss"
+        />
       </div>
     </main>
 
@@ -335,6 +407,11 @@ async function startOrContinue() {
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100vh;
+  /* 定高才能让下面的 overflow-y: auto 生效：#app 是 100vh + overflow hidden，
+     只给 min-height 时首页被撑高后超出部分直接被裁掉、滚不到（窄视口下引导卡并入
+     文档流时就是这样）。 */
+  height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 .home-content-banner {
@@ -379,6 +456,10 @@ async function startOrContinue() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  /* 🔴 不许被 .home-page（定高 flex 列）压缩：压到 100vh 后内容一高，
+     justify-content: center 会把溢出对半分到上下两头，顶部那半滚不到。
+     不收缩时本列随内容长高，内容不足一屏仍按 min-height 居中，与原来观感一致。 */
+  flex-shrink: 0;
   box-sizing: border-box;
   width: clamp(272px, 25vw, 348px);
   min-height: 100vh;

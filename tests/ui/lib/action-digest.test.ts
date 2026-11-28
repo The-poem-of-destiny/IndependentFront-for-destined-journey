@@ -1347,12 +1347,51 @@ describe('digestActionPanel — 审查 A6：交锋误判与百分比', () => {
     expect(d.targets).toEqual([]);
   });
 
-  it('名字形态的标题 `{莱恩 → 林狼 · 斩击}` 仍判交锋', () => {
+  it('无标签标题 `{莱恩 → 林狼 · 斩击}` 而正文只有结果行：两侧名字都没在正文出现，不判交锋', () => {
     const d = digestOf('{莱恩 → 林狼 · 斩击}\n| 结果: 命中 |');
+    expect(d.kind).not.toBe('exchange');
+    expect(d.actor).toBeUndefined();
+    expect(d.targets).toEqual([]);
+  });
+
+  it('名字形态但只是叙述的标题 `{晨 → 昏 · 赶路}` 不判交锋', () => {
+    const d = digestOf('{晨 → 昏 · 赶路}\n|结果|顺利抵达|\n|备注|晨昏交替时起了雾|');
+    expect(d.kind).not.toBe('exchange');
+    expect(d.actor).toBeUndefined();
+  });
+
+  it('名字只出现在叙述句里不算证据', () => {
+    const d = digestOf('{莱恩 → 林狼 · 斩击}\n|结果|莱恩挥剑劈向林狼|');
+    expect(d.kind).not.toBe('exchange');
+  });
+
+  it('目标在资源记号前出现：`{莱恩 → 林狼 · 斩击}` + `林狼 HP -34` 判交锋', () => {
+    const d = digestOf('{莱恩 → 林狼 · 斩击}\n| 结果: 命中 |\n| 变更: 林狼 HP -34 |');
     expect(d.kind).toBe('exchange');
     expect(d.actor).toBe('莱恩');
     expect(d.targets).toEqual(['林狼']);
     expect(d.action).toBe('斩击');
+    expect(d.deltas).toEqual([{ who: '林狼', resource: 'HP', delta: -34 }]);
+  });
+
+  it('行动者作为行首单位名出现也算证据', () => {
+    const d = digestOf('{莱恩 → 林狼 · 斩击}\n|莱恩|SP 140→128|\n|结果|命中|');
+    expect(d.kind).toBe('exchange');
+    expect(d.actor).toBe('莱恩');
+    expect(d.targets).toEqual(['林狼']);
+  });
+
+  it('多目标行 `→ 名字` 出现也算证据', () => {
+    const d = digestOf('{莱恩 → 林狼、灰狼 · 横扫}\n| → 灰狼: 命中 |\n|结果|命中|');
+    expect(d.kind).toBe('exchange');
+    expect(d.actor).toBe('莱恩');
+    expect(d.targets).toEqual(['林狼', '灰狼']);
+  });
+
+  it('名册单位出现也算证据', () => {
+    const d = digestOf('{莱恩 → 林狼 · 对峙}\n| 林狼: HP 60/60 | SP 30/30 |\n|结果|僵持|');
+    expect(d.kind).toBe('exchange');
+    expect(d.actor).toBe('莱恩');
   });
 
   it('格子里已认出行动者时，标题左边不是名字也照样补目标', () => {

@@ -6,6 +6,8 @@ import {
   acquireSaveTabLock,
   findSavesLockedElsewhere,
   isSaveLockedElsewhere,
+  PACK_ROLLBACK_SAVES_RESTORED_NOTICE,
+  PACK_SAVES_IN_USE_MESSAGE,
 } from '../../../src/ui/lib/save-tab-lock';
 
 /** 假 LockManager：一个名字同一时刻只给一个持有者；`external` 模拟别的标签页占着的锁 */
@@ -141,5 +143,13 @@ describe('findSavesLockedElsewhere / isSaveLockedElsewhere（删档与整库导�
       }),
     } as unknown as LockManager;
     expect(await findSavesLockedElsewhere(locks)).toEqual([]);
+  });
+});
+
+describe('内容包装卸的存档锁提示（L2）', () => {
+  it('拒绝提示点明另一个标签页与装 / 升 / 卸，回滚提醒要求刷新', () => {
+    expect(PACK_SAVES_IN_USE_MESSAGE).toContain('另一个标签页');
+    expect(PACK_SAVES_IN_USE_MESSAGE).toMatch(/安装、升级或卸载内容包/);
+    expect(PACK_ROLLBACK_SAVES_RESTORED_NOTICE).toBe('另一标签页的存档已被还原，请刷新它');
   });
 });

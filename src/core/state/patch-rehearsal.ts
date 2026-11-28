@@ -76,10 +76,8 @@ export class PatchRehearsal {
       };
     }
     if (!isCharacterPatchOp(patch.op)) return () => undefined;
-    // 按槽位卸下（不带名字）沿用旧预演的放行口径（既有用例钉着）：槽位穿戴取决于同批的
-    // equip / 拆分顺序，这里不判；提交时那个槽真空着仍会抛「该槽位无穿戴」
-    if (patch.op === 'unequip_item' && !(patch.value as { name?: unknown } | undefined)?.name)
-      return () => undefined;
+    // 按槽位卸下（不带名字）也走 reducer：工作副本已按补丁顺序落下同批的 equip / 拆分，
+    // 槽位真空着就在这里抛「该槽位无穿戴」，与提交时一致（2026-11-27 起不再放行）
     const next = cloneCharacter(this.current(owner));
     // 补丁也拷一份：reducer 会把补丁里的值并进角色，预演不与要提交的补丁共享引用
     reduceCharacterPatch(next, structuredClone(patch));

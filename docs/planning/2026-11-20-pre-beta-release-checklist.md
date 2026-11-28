@@ -27,8 +27,9 @@
   - [ ] `dev.sh` 自动探测的仍是旧内容仓文件夹名 `../fated_poem_independent_assets/data`（`dev.sh:33`），对齐现在的 `Independend-Frontend-Assets`。
 - [ ] **测试者拿不到正式内容**：内容中心服 `The-poem-of-destiny/fate-content-pack-server` 是私有仓、只有一个提交、未部署。
       二选一：部署中心服并做真实 Discord OAuth 端到端联调；或明确 beta 期间改用「从 JSON 文件导入」明文包（等于无访问控制，需主人接受）。
-- [ ] **首次上手路径缺失**：应用内没有把「内容包 → 添加 API → 建角色」串起来；README「首次游玩配置」已过时，且与准入页对 Embedding 的说法矛盾。见 `TODO.md` 首条。
+- [x] **首次上手路径缺失**（✅ 2026-11-27）：应用内没有把「内容包 → 添加 API → 建角色」串起来；README「首次游玩配置」已过时，且与准入页对 Embedding 的说法矛盾。见 `TODO.md` 首条。
   - 📌 2026-11-20：README 一半已完成 —— 「首次游玩」一节已对照现版本应用重写，并写明 Embedding 为可选；应用内首次上手引导仍未做。
+  - 📌 2026-11-27：应用内一半已完成 —— 首页新增「开始前的三步」引导（内容包 / API / 新建存档，状态由真实数据推导，分支 `fix/beta-prep-l1-l6-onboarding`，未真机走查），见 `docs/CHANGELOG.md`。API 配置页另有三处摩擦（RPM 卡、模板按钮、模型推荐不能一键套用）不挡 beta，留在 `TODO.md` 首条。
 - [ ] **默认开启但未真机验证的功能**：`stagedNarrative`（正文演出）与 `visualEffects`（界面特效层）在 `src/ui/stores/settings-store.ts` 默认 `true`。
       演出若卡住，玩家看不到行动选项。二选一：真机（含低配笔记本）走查通过，或 beta 默认关闭。
 
@@ -51,6 +52,7 @@
 - [ ] **`provinces.png` 不随包分发**：包里已有 `mapPack`，但势力图栅格只认同源 `/data/content/provinces.png`，装正式包的玩家势力图会报缺图。见 `TODO.md`「地图包不随内容包分发」。
 - [ ] **下一个内容包版本号必须大于 2.12.1**：内容仓 README 与中心服 README 的示例仍写 `2.8.0`，`build-pack` 默认 `1.0.0`。
 - [ ] **清掉内容仓默认配置里的两个本机 API 池 id**（`TODO.md` 已列）。
+  - 📌 2026-11-27 实测：内容仓 `content/content-pack-alpha` 分支上 `data/defaults/agent-config.json` 的 `agents.story` / `agents.prose_rewrite` 的 `model` 已为空串，`main` 上仍是两个本机池 id；合并 alpha 进 `main` 后即消除。
 - [ ] **第三方许可证**：`THIRD-PARTY-NOTICES.md` 与 `public/licenses/` 只覆盖 three.js 和字体；前端实际打包的 dexie（Apache-2.0）、openseadragon（BSD-3）、vue、pinia、fflate、quickjs-emscripten 等缺全文。仓库根目录也没有 `LICENSE` 文件（`package.json` 声明 MIT）。
   - 📌 2026-11-20：第三方全文部分已完成 —— `public/licenses/` 新增 7 份许可证全文（从 `node_modules` 原样复制），`THIRD-PARTY-NOTICES.md` 表格同步扩充。
     根目录 `LICENSE` / 本项目自身许可证的问题主人暂缓裁定，未做。

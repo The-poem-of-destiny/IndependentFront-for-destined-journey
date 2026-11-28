@@ -288,8 +288,12 @@ export function parseStatusEffectsXML(xmlBody: string): Array<{
     const owner = attrs.owner || '';
     const name = attrs.name || '';
     const category = (attrs.category as '增益' | '减益' | '特殊') || '减益';
-    const stacks = parseInt(attrs.stacks || '1', 10);
-    const maxStacks = parseInt(attrs.maxStacks || attrs.stacks || '1', 10);
+    // 层数同口径：解析不出数值（如 `stacks="三层"`）回落 1，与缺省一致；
+    // 上限解析不出则回落已解析的层数（至少 1），免得 NaN 进 add_status_effect。显式 0 保留
+    const parsedStacks = parseInt(attrs.stacks || '1', 10);
+    const stacks = Number.isFinite(parsedStacks) ? parsedStacks : 1;
+    const parsedMaxStacks = parseInt(attrs.maxStacks || attrs.stacks || '1', 10);
+    const maxStacks = Number.isFinite(parsedMaxStacks) ? parsedMaxStacks : Math.max(stacks, 1);
     // 解析不出数值（如 `remainingTime="永久"`）回落 60，与缺省同口径（原 `|| 60` 的意图）；
     // 否则 NaN 进 add_status_effect 会被内核时长校验拒掉，整条状态丢失。显式 0 保留
     const parsedTime = parseInt(attrs.remainingTime || '60', 10);
