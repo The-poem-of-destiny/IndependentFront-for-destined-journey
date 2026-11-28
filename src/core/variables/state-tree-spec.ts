@@ -8,9 +8,10 @@
  * - 以 `_` 开头的键只读（§3.3），`isReadonlyKey` 是唯一判据；路径解析时忽略 `_` 前缀（`findChildSpec`）。
  * - `等级` 例外：键名不带 `_`，NPC 可写、主角只读（§9 #2），由 `playerReadonly` 标出。
  * - `field` 是给人看的内核字段说明（`CharacterState.hp` 之类），不是可执行路径。
- * - `kernel`（内核字段键）与 `rule`（写入规则）是可执行映射：翻译层与编辑层只从这里读键 → 字段 / 规则，
+ * - `kernel`（内核字段键）与 `rule`（写入规则）是可执行映射：翻译层、编辑层与投影只从这里读键 → 字段 / 规则，
  *   不另写对照表（审查报告 R6a，`tests/core/variables/state-tree-spec-source-gate.test.ts` 钉住）。
- *   这两项不进协议文字，改它们不会让 `direct_cached` 冷建。
+ *   现算节点不带 `kernel`，改带派生标识 `derived`（L6，2026-11-27），投影按它取值。
+ *   这三项不进协议文字，改它们不会让 `direct_cached` 冷建。
  *
  * 🔴 只许依赖 `content/field-enums.ts`（与 `agents/direct-contract.ts` 同一规矩）：本文件要被协议文字生成器读，
  *    一旦拉进 state-manager / types 运行时值就会成环。
@@ -82,6 +83,13 @@ export type StateTreeEnumKind =
   | 'attribute'
   | 'damageType';
 
+/**
+ * 派生标识：现算、不落库的只读节点由投影按此取值（年龄 / 生日 / 基础上限 / 时段 / 天气 / 回合）。
+ * 与 `kernel` / `rule` 一样不进协议文字，改它不让 `direct_cached` 冷建。
+ */
+export type StateTreeDerivedKind =
+  'age' | 'birthday' | 'capBase' | 'timeOfDay' | 'weather' | 'turn';
+
 /** 整实体种类：`record` 的条目被整对象写入时按此组装（§5.2「整实体值」）。 */
 type StateTreeEntityKind =
   | 'character'
@@ -152,6 +160,8 @@ interface NodeBase {
   readonly kernel?: string;
   /** 写入规则（见 `StateTreeWriteRule`）。 */
   readonly rule?: StateTreeWriteRule;
+  /** 现算节点的派生标识（见 `StateTreeDerivedKind`）；有它的节点没有 `kernel`。 */
+  readonly derived?: StateTreeDerivedKind;
   /** 键名不带 `_` 但对主角只读（`成长.等级`，§3.3）。 */
   readonly playerReadonly?: boolean;
   /** 只在 `关系列表` 的人物上出现（在场 / 地点 / 好感度 / 数量）。 */
@@ -293,7 +303,10 @@ function resource(key: string, cur: 'hp' | 'mp' | 'sp'): StateTreeBranchSpec {
       branch(
         '上限',
         [
-          leaf('_基础', 'capBase', { field: `calcResources(tier, attributes).${cap}（不落库）` }),
+          leaf('_基础', 'capBase', {
+            field: `calcResources(tier, attributes).${cap}（不落库）`,
+            derived: 'capBase',
+          }),
           leaf('额外', 'capBonus', {
             field: `CharacterState.${cap}Bonus`,
             kernel: `${cap}Bonus`,
@@ -511,8 +524,8 @@ export const PERSON_NODE_CHILDREN: readonly StateTreeNodeSpec[] = [
       leaf('性别', 'text', profileText('gender')),
       leaf('身份', 'textArray', profileList('identity')),
       leaf('职业', 'textArray', profileList('occupation')),
-      leaf('_年龄', 'number', { field: 'ageAt(ageAnchor, gameTime)（现算）' }),
-      leaf('_生日', 'text', { field: 'CharacterState.ageAnchor 的生日' }),
+      leaf('_年龄', 'number', { field: 'ageAt(ageAnchor, gameTime)（现算）', derived: 'age' }),
+      leaf('_生日', 'text', { field: 'CharacterState.ageAnchor 的生日', derived: 'birthday' }),
       leaf('外貌', 'text', profileText('appearance')),
       leaf('着装', 'text', profileText('outfit')),
       leaf('性格', 'text', profileText('personality')),
@@ -528,7 +541,7 @@ export const PERSON_NODE_CHILDREN: readonly StateTreeNodeSpec[] = [
     { note: '文字字段的路径写入转成 update_character 补丁（§5.5，2026-11-25 更正）' },
   ),
   branch('成长', [
-    leaf('_生命层级', 'number', { field: 'CharacterState.tier' }),
+    leaf('_生命层级', 'number', { field: 'CharacterState.tier', kernel: 'tier' }),
     leaf('等级', 'number', {
       field: 'CharacterState.level',
       kernel: 'level',
@@ -541,8 +554,8 @@ export const PERSON_NODE_CHILDREN: readonly StateTreeNodeSpec[] = [
       kernel: 'totalExp',
       rule: 'totalExp',
     }),
-    leaf('_升级所需经验', 'number', { field: 'CharacterState.expToNext' }),
-    leaf('_属性点', 'number', { field: 'CharacterState.freeAttrPoints' }),
+    leaf('_升级所需经验', 'number', { field: 'CharacterState.expToNext', kernel: 'expToNext' }),
+    leaf('_属性点', 'number', { field: 'CharacterState.freeAttrPoints', kernel: 'freeAttrPoints' }),
     branch(
       '_属性',
       (Object.keys(ATTRIBUTE_LABELS) as Array<keyof typeof ATTRIBUTE_LABELS>).map((k) =>
@@ -633,9 +646,9 @@ export const STATE_TREE_SPEC: StateTreeBranchSpec = branch('stat_data', [
       kernel: 'location',
       rule: 'worldLocation',
     }),
-    leaf('_时段', 'text', { field: '由游戏时间推导' }),
-    leaf('_天气', 'text', { field: 'worldFlags.map 天气' }),
-    leaf('_回合', 'number', { field: '当前回合号' }),
+    leaf('_时段', 'text', { field: '由游戏时间推导', derived: 'timeOfDay' }),
+    leaf('_天气', 'text', { field: 'worldFlags.map 天气', derived: 'weather' }),
+    leaf('_回合', 'number', { field: '当前回合号', derived: 'turn' }),
   ]),
   leaf('命运点数', 'fatePoints', {
     field: 'SaveProfile.fp（走账本）',

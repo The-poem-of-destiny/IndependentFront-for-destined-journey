@@ -479,3 +479,42 @@ describe('authenticated content lifecycle and plaintext boundary', () => {
     expect(await db.combatSandboxes.count()).toBe(0);
   });
 });
+
+// 📌 2026-11-27（L2）：授权内容包的装 / 卸同样先试探存档标签页锁，被别的标签页占着就零写入拒绝
+describe('授权内容包 —— 存档被别的标签页占用时拒绝装卸（L2）', () => {
+  function lockElsewhere(): void {
+    const locks = {
+      request: vi.fn(),
+      query: vi.fn(async () => ({
+        held: [{ name: 'poem-save:other-tab', mode: 'exclusive', clientId: 'x' }],
+        pending: [],
+      })),
+    };
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: locks });
+  }
+  afterEach(() => {
+    delete (navigator as { locks?: unknown }).locks;
+  });
+
+  it('installProtectedPack 返回 saves_in_use，不落包行', async () => {
+    const store = useContentStore();
+    await store.hydratePackState();
+    lockElsewhere();
+    const outcome = await store.installProtectedPack(encryptPrivatePack());
+    expect(outcome.ok).toBe(false);
+    expect(outcome.status).toBe('saves_in_use');
+    expect(await getDatabase().contentPacks.count()).toBe(0);
+    expect(getActivePackPayload()).toBeUndefined();
+  });
+
+  it('uninstallPack（授权包）返回 saves_in_use，内存里的包不卸下、包行保留', async () => {
+    const { store } = await install();
+    lockElsewhere();
+    const outcome = await store.uninstallPack();
+    expect(outcome.ok).toBe(false);
+    expect(outcome.status).toBe('saves_in_use');
+    expect(store.leaseState).toBe('ACTIVE_UNLOCKED');
+    expect(getActivePackPayload()).toBeDefined();
+    expect(await getDatabase().contentPacks.get('fixture')).toBeDefined();
+  });
+});

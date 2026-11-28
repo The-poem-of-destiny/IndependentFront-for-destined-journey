@@ -196,6 +196,11 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │                                          不受限**，所以本目录是「值得收口的东西的家」，不是必经之路
 │   ├── journey-readiness.ts         ← 创角前本机配置检查；复用 endpoint-resolver 与主 DAG 名册，不发网络请求
 │   │                                   📌 2026-11-14：报错里的 Agent 改用中文名（取自 agent-roster.ts）
+│   ├── onboarding.ts                ← 🆕 [2026-11-27] 首页「开始前的三步」纯函数（无 Vue / Pinia）：`deriveOnboardingSteps`
+│   │                                   （内容包「建议」/ API「必须」+ Embedding 可选副项 / 新建存档「必须」）与 `resolveOnboardingPanel`
+│   │                                   （expanded / collapsed / hidden）。🔴 完成状态全由真实状态推导（content-store、`settings.apiPool`
+│   │                                   经 `buildApiEndpoints` 筛 LLM 源、存档列表），只持久化 `UiSettings.onboardingDismissed`；
+│   │                                   这组界面文案的**唯一出处**，对齐 README「首次游玩」，改一处要同步另一处
 │   ├── agent-roster.ts              ← 🆕 2026-11-14 Agent 中文名表 + 直出名册 + 「哪种存档模式会读哪些
 │   │                                   Agent 配置」的推导（主 DAG 成员与顺序直接摊平引擎管线，不手写）；
 │   │                                   设置页子导航分组与 journey-readiness 共用
@@ -355,6 +360,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   ├── fx-pointer.ts                ← 🆕 [特效层] 全应用至多一个 `pointermove`（仅 `(hover: hover)` 设备）+
 │   │                                   `registerParallax`（只写元素自己的 transform，收敛后不再排帧）。
 │   │                                   🔴 永远不要逐帧往 html/body 写 CSS 变量
+│   │                                   📌 2026-11-27 更正（审查遗留 L3）：判据已改为 `(any-hover: hover)`（触屏笔记本 / 接了鼠标的平板也挂），
+│   │                                   并丢弃 `pointerType === 'touch'` 的移动；上面「仅 `(hover: hover)` 设备」一句作废
 │   ├── fx-sheen.ts                  ← 🆕 [特效层] 指针光泽的纯逻辑与控制器：控件 / 面板选择器、进入时量一次矩形、
 │   │                                   高光坐标只写在 puck / ring 自己身上；`.chat-flow` / `.turn-activity` 排除
 │   ├── fx-glint.ts                  ← 🆕 [特效层] 偶发闪光：40–90s 挑一个可见面板框沿一条边划过（约 900ms，不循环）；
@@ -403,6 +410,9 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   `isSaveLockedElsewhere`，经 `navigator.locks.query()` 只读试探；删档、整库导入、清除所有数据
 │   │                                   （存档管理窗口与设置页数据分区）被别的标签页占用时拒绝，本标签页自持的锁不拦。
 │   │                                   🔴 内容包装包失败的整库回滚尚未经此试探（见 docs/known-issue.md）
+│   │                                   📌 2026-11-27 更正（审查遗留 L2）：上一句作废 —— `stores/content-store.ts` 装 / 升 / 卸内容包的五个入口
+│   │                                   写入前经此试探，被别的标签页占用时返回 `saves_in_use`、零写入（提示常量 `PACK_SAVES_IN_USE_MESSAGE`）；
+│   │                                   `rollbackTo` 还原前复查，命中时仍整库还原，错误文案后追加 `PACK_ROLLBACK_SAVES_RESTORED_NOTICE`（提醒刷新那个标签页）
 │   ├── turn-failure.ts              ← 🆕 [2026-11-14 / GAME-05] 回合失败归类（auth/quota/rate_limit/network/
 │   │                                   server/rejected/config/unknown）与措辞的**唯一出处**；原文先
 │   │                                   `redactSecrets` 脱敏再截断（上游错误体可能回显密钥）。
@@ -435,6 +445,8 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │                                   `verdict` / `deltas`（`|变更|` 等的 HP/MP/SP 增减，同人同资源合并）/ `roster` / `roll` /
 │   │                                   `targetResults` / `statuses` / `result`（`|结果|` 句）/ `facts`。generic 的 `facts` 恒等于
 │   │                                   旧 `summaryCells(第一节)`，认不出的老面板收起时与以前一样。🔴 资源记号手写游标扫，不写会回溯的正则
+│   │                                   📌 2026-11-27（审查遗留 L4）：无标签的 `甲 → 乙` 标题除左边名字形态外，还要格子已认出目标或箭头任一侧名字
+│   │                                   在正文里作为单位出现（`titleNamesInBody`）才判交锋；「仅标题 + 结果行」的旧格式面板退回通用视图
 │   ├── action-panel-view.ts         ← 🆕 [2026-11-23] 行动面板**视图模型** `buildActionView`（纯函数）：摘要 → 卡片该画什么
 │   │                                   （逐目标命中 / 资源变化 / 状态 / 掷骰、`ownDeltas`、`outcome`、展开体 `calc` 的高亮 token）。
 │   │                                   有 `|行动者|` 却无目标与对外 HP 变化的面板改判 outcome；样式组件只照着画，不自己推导
@@ -786,7 +798,16 @@ src/ui/                              ← Vue 3 + Pinia + Vite 前端（单 URL �
 │   │   │                               工坊 store 读完前不显示；设置页左栏与游戏菜单的入口照旧
 │   │   │                               📌 2026-11-25（审查 R8，`chore/ui-cleanup-batch`）：快速测试住 `home/DevQuickTestRow.vue`，
 │   │   │                               以字面量 `import.meta.env.DEV` 门控异步引入，生产不打包
+│   │   │                               📌 2026-11-27：接线 `home/HomeOnboarding.vue`（放在 `.btn-column` 之外，免触发背景脉冲）；
+│   │   │                               直达按钮分别打开设置「内容包」/「API 配置」分区与新建存档；手动开合只存在本次会话
 │   │   ├── DevQuickTestRow.vue      ← 🆕 [2026-11-25] 首页开发用快速测试行（只在开发构建出现）
+│   │   ├── HomeOnboarding.vue       ← 🆕 [2026-11-27] 「开始前的三步」面板：只渲染 `lib/onboarding.ts` 给的模型与文案，
+│   │   │                               发 go / open / close / dismiss 事件，由 HomePage 处理。任一数据仍在读取时不渲染；
+│   │   │                               必需步满足后自动收起，三步全完成连入口一起隐藏；「不再显示」后不再自动展开，收起入口仍可手动重开
+│   │   │                               🔴 布局约束：宽屏卡片底边对齐按钮列、向上生长，`max-height` 由脚本按「按钮列底部 −（横幅下沿与视口顶
+│   │   │                               较低者 + 16px）」写内联值（HomePage 经 `topGuard` 传入横幅元素），卡内滚动、标题行 sticky；
+│   │   │                               `.home-page` 定高 100dvh 自身滚动，因此 `.home-stage-ui` 必须 `flex-shrink: 0`，否则窄屏内容对半溢出、
+│   │   │                               顶部滚不到（`HomeOnboarding.test.ts` 有源码闸门）
 │   │   ├── AstralDriftBackdrop.vue  ← [星流首页] 懒加载 / WebGL2 与减动效降级 / 可见性暂停 / 销毁壳
 │   │   │                               📌 2026-11-14：`defineExpose({ setEnergy, pulse })` 转发给当前场景，无场景时空操作
 │   │   ├── drift/runtime.ts         ← [星流首页] Three.js 场景单文件运行时；工厂 + 主题切换 + 生命周期

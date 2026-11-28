@@ -17,6 +17,7 @@ type PackUninstallResult =
   | { status: 'cancelled' }
   | { status: 'uninstalled'; outcome: PackUninstallOutcome }
   | { status: 'busy' }
+  | { status: 'saves_in_use' }
   | { status: 'failed' };
 
 interface UninstallTarget {
@@ -64,8 +65,15 @@ export async function confirmAndUninstallPack(
     if (!ok) return { status: 'cancelled' };
     const done = await target.uninstallPack({ confirmEdits: true });
     if (done.ok) return { status: 'uninstalled', outcome: done };
-    return done.status === 'busy' ? { status: 'busy' } : { status: 'failed' };
+    return refusal(done);
   }
   if (outcome.ok) return { status: 'uninstalled', outcome };
-  return outcome.status === 'busy' ? { status: 'busy' } : { status: 'failed' };
+  return refusal(outcome);
+}
+
+/** 未卸成的结果分流：另一次操作在跑 / 存档被别的标签页占着（2026-11-27，L2）/ 其余算失败 */
+function refusal(outcome: PackUninstallOutcome): PackUninstallResult {
+  if (outcome.status === 'busy') return { status: 'busy' };
+  if (outcome.status === 'saves_in_use') return { status: 'saves_in_use' };
+  return { status: 'failed' };
 }

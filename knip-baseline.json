@@ -44,7 +44,6 @@
   "exports|src/core/plot/plot-threads.ts|PLOT_THREAD_RESOLVED_HISTORY_LIMIT",
   "exports|src/core/state/save-profile.ts|getQuest",
   "exports|src/core/state/save-profile.ts|setPlotThreadFlagsInPlace",
-  "exports|src/core/state/state-manager.ts|findByName",
   "exports|src/core/variables/var-resolver.ts|moveVar",
   "exports|src/core/workshop/workshop-types.ts|WORKSHOP_BOOK_ID_PREFIX",
   "exports|src/core/workshop/workshop-types.ts|WORKSHOP_RULE_ID_PREFIX",

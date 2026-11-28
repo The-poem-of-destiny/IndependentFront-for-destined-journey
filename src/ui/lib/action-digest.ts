@@ -804,6 +804,33 @@ function parseTargets(raw: string, actor: string | undefined, selfAllowed: boole
   );
 }
 
+/**
+ * 标题箭头两侧的名字有没有在面板正文里**作为单位**出现：行首单位名（`|林狼|HP 30→20|`）、
+ * 资源记号前的名字（`林狼 HP -34`，按最长后缀认已知名）、名册单位（`林狼: HP 60/60`）、
+ * 多目标行 `→ 林狼`。只出现在叙述句里不算 —— 那证明不了标题是「谁对谁」。
+ * 全部复用手写游标扫描（scanResources / rowLeadName / arrowName），线性、不回溯。
+ */
+function titleNamesInBody(rows: DigestCell[][], candidates: readonly string[]): boolean {
+  const names = new Set(candidates.filter(Boolean));
+  if (names.size === 0) return false;
+  for (const row of rows) {
+    const lead = rowLeadName(row);
+    if (lead && names.has(lead)) return true;
+    const first = row[0];
+    const arrow = first
+      ? (arrowName(first.label) ?? (first.label ? null : arrowName(first.value)))
+      : null;
+    if (arrow && names.has(arrow)) return true;
+    for (const cell of row) {
+      const text = labelResource(cell.label) ? `${cell.label} ${cell.value}` : cell.value;
+      for (const tok of scanResources(text, names)) {
+        if (tok.known || names.has(tok.name)) return true;
+      }
+    }
+  }
+  return collectRoster(rows).some((u) => names.has(u.name));
+}
+
 function collectParticipants(panel: ActionPanel, rows: DigestCell[][]): Participants {
   const cells = rows.flat();
   const has = (label: string): boolean => cells.some((c) => c.label === label);
@@ -851,18 +878,26 @@ function collectParticipants(panel: ActionPanel, rows: DigestCell[][]): Particip
   let targets = targetRaw ? parseTargets(targetRaw.value, actor, targetRaw.self) : [];
 
   // 兜底：分节标题 `甲 → 乙 · 招式`。
-  // 带 `→` 的标题不一定是交锋（`制作流程: 熔炼 → 锻打` 是流程）：左边得是名字形态，
-  // 或者格子里已经认出了行动者（别的交锋证据），才从标题取。
+  // 带 `→` 的标题不一定是交锋（`制作流程: 熔炼 → 锻打` 是流程，`{晨 → 昏 · 赶路}` 是叙述）：
+  // 格子里已经认出了行动者 / 目标（别的交锋证据）时照取；否则左边得是名字形态，
+  // **且**箭头任一侧的名字在面板正文里作为单位出现过（见 titleNamesInBody），才从标题取。
   if (!actor || targets.length === 0 || !action) {
     const title = panel.sections.find((s) => s.title.includes('→'))?.title;
     const arrow = title ? title.indexOf('→') : -1;
     const left = title ? cleanName(title.slice(0, arrow)) : '';
     const leftIsName = isNameShaped(title ? title.slice(0, arrow) : '');
-    if (title && (leftIsName || actor)) {
-      const right = title
-        .slice(arrow + 1)
-        .split(/[·・]/)
-        .map((s) => s.trim());
+    const right = title
+      ? title
+          .slice(arrow + 1)
+          .split(/[·・]/)
+          .map((s) => s.trim())
+      : [];
+    const trusted =
+      !!actor ||
+      (leftIsName &&
+        (targets.length > 0 ||
+          titleNamesInBody(rows, [left, ...parseTargets(right[0] ?? '', left, true)])));
+    if (title && trusted) {
       if (!actor && left) actor = left;
       if (targets.length === 0 && right[0]) targets = parseTargets(right[0], actor, true);
       if (!action && right[1]) action = right[1];

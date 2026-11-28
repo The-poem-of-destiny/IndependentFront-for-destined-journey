@@ -21,6 +21,7 @@ import AppButton from './AppButton.vue';
 import { confirmDialog } from '../../lib/confirm-dialog';
 import { confirmAndUninstallPack } from '../settings/pack-uninstall-flow';
 import { describeDevContentNotices } from '../../lib/dev-content-source';
+import { PACK_SAVES_IN_USE_MESSAGE } from '../../lib/save-tab-lock';
 
 const content = useContentStore();
 const ui = useUIStore();
@@ -154,6 +155,8 @@ function importPack() {
           if (go) ui.openSettings('content-pack');
         } else if (outcome.status === 'invalid') {
           ui.toast('内容包校验未通过', 'error');
+        } else if (outcome.status === 'saves_in_use') {
+          ui.toast(PACK_SAVES_IN_USE_MESSAGE, 'error');
         }
         return;
       }
@@ -178,6 +181,7 @@ async function uninstallPack() {
     if (result.status === 'cancelled') return;
     if (result.status === 'uninstalled') ui.toast('内容包已卸载，已回到演示级占位内容', 'success');
     else if (result.status === 'busy') ui.toast('另一次内容包操作正在进行，请稍后再试', 'error');
+    else if (result.status === 'saves_in_use') ui.toast(PACK_SAVES_IN_USE_MESSAGE, 'error');
     else ui.toast('卸载失败', 'error');
   } catch {
     ui.toast('卸载失败', 'error');

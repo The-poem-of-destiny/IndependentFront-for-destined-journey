@@ -1,13 +1,9 @@
-# Known issue: 2026-11-25 整合审查修复的遗留缺陷（2026-11-25 记档）
+# Known issue: 首页「开始前的三步」两处低危外观遗留（2026-11-27 记档）
 
-状态：**已定位、未修**。来自 [两周整合审查](reviews/2026-11-25-consolidation-review.md) 的修复轮（整合分支 `refactor/review-fixes-2026-11-25`），按文档维护守则第 6 条从报告「遗留问题」节晋升；编号与报告的 L 号对应，报告里另有几条非缺陷的遗留（待裁定语义、工具重复、建议未做）只留在报告。
+状态：**已定位、未修**（来自 beta 准备 PR 的复审，不挡合并）。只影响外观与点击舒适度，不影响功能。
 
-1. **L1 预演不预判按槽位卸下，提交时整楼失败。** 现象：模型只给槽位、不带名字的 `unequip_item`，在槽位为空时让整楼提交失败。根因：`src/core/state/patch-rehearsal.ts` 对不带名字的卸下直接放行（既有断言钉着），提交时内核抛「该槽位无穿戴」。修复方向：预演按槽位查当前穿戴，空槽只丢该条并记丢弃，同时改那条断言。
-2. **L2 装包失败回滚不看标签页锁。** 现象：内容包安装失败回滚时，另一标签页正在游玩的存档会被一起还原。根因：`src/ui/stores/content-store.ts` 的 `rollbackTo` 用 `importAllData(snapshot)` 整库还原，没有经过删档 / 整库导入已在用的标签页锁试探（`lib/save-tab-lock.ts` 的 `findSavesLockedElsewhere`）。修复方向：回滚前同样试探，或把回滚范围收窄到装包涉及的表。
-3. **L3 fx-foil 混合输入只落进入点。** 现象：主输入设备不支持悬停（如触屏 / 平板）但外接了鼠标时，`src/ui/lib/fx-foil.ts` 只在 `pointerenter` 进入点落一次光，之后不跟随指针移动。低危，只影响特效。根因：fx-pointer 只在 `(hover: hover)` 设备注册全局 `pointermove`，fx-foil 悬停期间订阅的全局源在这类设备上没有事件。修复方向：全局指针源改按实际指针类型（或 `any-hover`）决定是否注册。
-4. **L4 无标签箭头标题仍判交锋。** 现象：面板没有 `|行动者|` / `|目标|` 等标签行、标题带 `→` 且左边恰好呈名字形态时，收起态被画成交锋。根因：`src/ui/lib/action-digest.ts` 在 A6 修复后只要求左边是名字形态或已认出行动者。修复方向：无标签时要求箭头至少一侧是已知参与者。
-5. **L5 entity_gen 状态的 stacks / maxStacks 解析出 NaN。** 现象：模型给出非数字的 `stacks` / `maxStacks` 时，NaN 进 `add_status_effect`。根因：`src/core/agents/entity-gen-parse.ts` 状态块的 `parseInt(attrs.stacks …)` 无回落（同函数的 `remainingTime` 已有回落）。修复方向：非有限值回落 1，补回归用例。
-6. **L6 状态树投影仍有手写键 → 字段映射。** 现象：改词表 `kernel` 映射后，投影可能与翻译层 / 编辑层不一致，且没有闸门报错。根因：`src/core/variables/state-tree-projection.ts` 的键 → 内核字段对应没纳入 `state-tree-spec.ts` 真源。修复方向：投影也从词表读，并纳入 `tests/core/variables/state-tree-spec-source-gate.test.ts`。
+1. **窄宽屏展开态横幅压住标题右上角。** 现象：宽 ≤1099、宽高比 >23/20、高 >760 且引导卡展开时，卡片并入文档流把标题推到顶部，内容态横幅（`.home-content-banner`，absolute）盖住标题框右上角（1024×768 约 30×54px，900×780 盖到标题文字盒右缘 11px）；收起后无相交。基线在这一带标题居中，不相交，属本次引入。修复方向：窄屏布局给横幅留出上边距，或让横幅在该带进入文档流。（800×600、390×844 的相交是基线原有。）
+2. **说明 `<summary>` 有效命中高约 28px。** 现象：`src/ui/components/home/HomeOnboarding.vue` 的 `<summary>` 盒高 37px，但下方 8px 被直达按钮 `::after` 扩出的命中区抢占，低于 `docs/design.md` §8 的 36px。修复方向：两者命中区互不重叠（如 summary 与按钮之间留够间距，或按钮只向下扩命中区）。
 
 ---
 

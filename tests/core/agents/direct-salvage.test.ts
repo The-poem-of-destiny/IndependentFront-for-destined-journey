@@ -619,6 +619,19 @@ describe('复审补充：提交时必抛的补丁在建补丁阶段先丢', () =
     expect(built.dropped).toEqual(['equip_item（characters.旅人）：物品不存在: 长枪，已忽略']);
     expect(built.patches.map((p) => p.target)).toEqual(['affections.莉娜']);
   });
+  it('卸下缺名字（只剩空引用）：预演不再放行，只丢那条卸下并记 dropped', () => {
+    const data = withSentinel(updates());
+    data.state.items = { equip: [{ owner: '旅人', target: '短剑', slot: '武器' }] };
+    const draft = parse(data);
+    // 直出契约里的卸下总按名字；这里在解析之后塞一条没有名字的卸下，模拟预演收到「不带名字」的补丁
+    (draft.updates.state as Row).characters = { remove: [{ name: '旅人', path: 'equipment' }] };
+    const built = build(draft, [richPlayer()]);
+    expect(built.dropped).toEqual([
+      'unequip_item（characters.旅人）：unequip_item 需要 value.name 或 value.slot，已忽略',
+    ]);
+    expect(built.patches.map((p) => p.op)).toEqual(expect.arrayContaining(['equip_item']));
+    expect(built.patches.some((p) => p.op === 'unequip_item')).toBe(false);
+  });
   it('其余库存 / 技能问题：不存在的物品、数量不足、自我转移、堆叠穿戴、删不存在的技能各丢一条', () => {
     const data = withSentinel(updates());
     data.state.items = {

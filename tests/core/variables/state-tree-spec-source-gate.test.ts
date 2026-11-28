@@ -3,7 +3,7 @@
  *
  * 1. 词表里每个可写叶子都能被翻译层解析到写入规则与内核字段（`stateTreeTranslationRuleOf` /
  *    `stateTreeKernelFieldOf` 都读词表）。
- * 2. 翻译层 / 编辑层源码里不再出现词表外的硬编码键映射：中文键 → 内核字段的对象字面量、
+ * 2. 翻译层 / 编辑层 / 投影源码里不再出现词表外的硬编码键映射：中文键 → 内核字段的对象字面量、
  *    按中文键分派的 `case '…'`、成串的中文键清单（`*_FIELD_KEYS` / `*_ENTITY_KEYS` 一类）。
  */
 import { readdirSync, readFileSync } from 'node:fs';
@@ -21,10 +21,12 @@ import {
 } from '../../../src/core/variables/state-tree-translator';
 
 const VARIABLES_DIR = resolve(__dirname, '../../../src/core/variables');
-// 翻译层自 R6b 起拆到 translator/ 目录：入口、编辑层与该目录下每个模块都扫
+// 翻译层自 R6b 起拆到 translator/ 目录：入口、编辑层与该目录下每个模块都扫；
+// 投影自 L6（2026-11-27）起也只从词表读键 → 字段
 const SOURCES = [
   'state-tree-translator.ts',
   'state-tree-edit.ts',
+  'state-tree-projection.ts',
   ...readdirSync(resolve(VARIABLES_DIR, 'translator'))
     .filter((f) => f.endsWith('.ts'))
     .map((f) => `translator/${f}`),
@@ -91,7 +93,7 @@ describe('词表 → 翻译层：每个可写叶子都解析到内核字段', ()
   });
 });
 
-describe('翻译层 / 编辑层：没有词表外的硬编码键映射', () => {
+describe('翻译层 / 编辑层 / 投影：没有词表外的硬编码键映射', () => {
   for (const { name, code } of SOURCES) {
     it(`${name}：没有「中文键: 内核字段」对象字面量`, () => {
       const re = new RegExp(`[{,]\\s*['"]?${HAN}+['"]?\\s*:`, 'g');

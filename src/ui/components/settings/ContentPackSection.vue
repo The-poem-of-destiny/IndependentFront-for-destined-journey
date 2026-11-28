@@ -26,6 +26,7 @@ import {
   type PackUpdateInfo,
 } from '../../lib/content-pack-updater';
 import { confirmAndUninstallPack } from './pack-uninstall-flow';
+import { PACK_SAVES_IN_USE_MESSAGE } from '../../lib/save-tab-lock';
 
 const cfg = useSettingsStore();
 const ui = useUIStore();
@@ -141,7 +142,8 @@ async function applyPackUpdate() {
     } else if (outcome.ok) {
       await afterPackApplied(outcome.notes ?? []);
       ui.toast('授权内容包已安装，自动续期已启用', 'success');
-    } else ui.toast('内容包操作正在进行，请稍后重试', 'error');
+    } else if (outcome.status === 'saves_in_use') ui.toast(PACK_SAVES_IN_USE_MESSAGE, 'error');
+    else ui.toast('内容包操作正在进行，请稍后重试', 'error');
   } catch (error) {
     ui.toast(error instanceof Error ? error.message : '获取内容包失败', 'error');
   } finally {
@@ -190,6 +192,8 @@ async function runInstall(raw: unknown) {
       } else if (outcome.status === 'invalid') {
         packError.value = formatValidationErrors(outcome.validationErrors);
         ui.toast('内容包校验未通过', 'error');
+      } else if (outcome.status === 'saves_in_use') {
+        ui.toast(PACK_SAVES_IN_USE_MESSAGE, 'error');
       }
       return;
     }
@@ -229,6 +233,8 @@ async function runUpgradeRaw(raw: unknown): Promise<void> {
   } else if (outcome.status === 'invalid') {
     packError.value = formatValidationErrors(outcome.validationErrors);
     ui.toast('内容包校验未通过', 'error');
+  } else if (outcome.status === 'saves_in_use') {
+    ui.toast(PACK_SAVES_IN_USE_MESSAGE, 'error');
   }
 }
 
@@ -250,7 +256,10 @@ async function confirmPackInstall() {
           ? content.upgradePack(raw, { confirmConflicts: true })
           : content.installPack(raw, { confirmConflicts: true }));
     if (!outcome.ok) {
-      ui.toast('内容包安装失败', 'error');
+      ui.toast(
+        outcome.status === 'saves_in_use' ? PACK_SAVES_IN_USE_MESSAGE : '内容包安装失败',
+        'error',
+      );
       return;
     }
     await afterPackApplied(outcome.notes ?? []);
@@ -287,6 +296,8 @@ async function requestUninstall() {
       await cfg.loadAgentProjectDefaults();
     } else if (result.status === 'busy') {
       ui.toast('另一次内容包操作正在进行，请稍后再试', 'error');
+    } else if (result.status === 'saves_in_use') {
+      ui.toast(PACK_SAVES_IN_USE_MESSAGE, 'error');
     } else ui.toast('卸载失败', 'error');
   } catch (err) {
     console.error('[content-pack] 内容包卸载失败:', err);

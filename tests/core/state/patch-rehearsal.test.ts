@@ -146,7 +146,7 @@ describe('PatchRehearsal：建补丁预演', () => {
     ]);
   });
 
-  it('卸下 / 修改物品：名字不在身上时抛错，卸下缺名字放行', () => {
+  it('卸下 / 修改物品：名字不在身上时抛错，按槽位卸下空槽抛错', () => {
     const r = new PatchRehearsal(cast());
     expect(
       run(r, [
@@ -155,7 +155,44 @@ describe('PatchRehearsal：建补丁预演', () => {
         p('update_item', { name: '盾牌' }),
         p('update_item', { name: '长剑' }),
       ]),
-    ).toEqual(['物品不存在: 盾牌', null, '物品不存在: 盾牌', null]);
+    ).toEqual(['物品不存在: 盾牌', '该槽位无穿戴: 武器', '物品不存在: 盾牌', null]);
+  });
+
+  it('按槽位卸下：槽位无法识别、缺名字缺槽位都与提交时同样抛错', () => {
+    const r = new PatchRehearsal(cast());
+    expect(run(r, [p('unequip_item', { slot: '尾巴' }), p('unequip_item', {})])).toEqual([
+      '无法识别的装备槽位: 尾巴',
+      'unequip_item 需要 value.name 或 value.slot',
+    ]);
+  });
+
+  it('按槽位卸下：同批先穿上再按槽位卸下可以落，卸下后再卸同一槽抛错', () => {
+    const r = new PatchRehearsal(cast());
+    expect(
+      run(r, [
+        p('equip_item', { name: '长剑', slot: '武器' }),
+        p('unequip_item', { slot: '武器' }),
+        p('unequip_item', { slot: '武器' }),
+      ]),
+    ).toEqual([null, null, '该槽位无穿戴: 武器']);
+  });
+
+  it('按槽位卸下：已穿戴的快照可以直接按槽位卸下', () => {
+    const characters = cast();
+    characters[0].inventory[1].equippedSlot = '武器';
+    const r = new PatchRehearsal(characters);
+    expect(run(r, [p('unequip_item', { slot: '武器' })])).toEqual([null]);
+    expect(characters[0].inventory[1].equippedSlot).toBe('武器');
+  });
+
+  it('snapshot / restore 回滚含按槽位卸下的一组补丁', () => {
+    const r = new PatchRehearsal(cast());
+    r.vet(p('equip_item', { name: '长剑', slot: '武器' }))();
+    const before = r.snapshot();
+    r.vet(p('unequip_item', { slot: '武器' }))();
+    expect(() => r.vet(p('unequip_item', { slot: '武器' }))).toThrow('该槽位无穿戴: 武器');
+    r.restore(before);
+    expect(() => r.vet(p('unequip_item', { slot: '武器' }))).not.toThrow();
   });
 
   it('技能：不存在时移除 / 修改抛错，先加后改可以落，移除后再改抛错', () => {

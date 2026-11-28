@@ -9,16 +9,13 @@
 
 > 📌 2026-11-20：发 beta 前的闸门汇总见 [`docs/planning/2026-11-20-pre-beta-release-checklist.md`](docs/planning/2026-11-20-pre-beta-release-checklist.md)（只做索引，正文仍以本文件为准）。
 
-- [ ] **发布测试版前：重写 README「首次游玩配置」并补应用内首次上手路径** —— README 该节已过时
-      （2026-11-16 已加过时提示）：推荐 API 组合、设置页分区名与路径都需对照现版本重写；
-      其中「Embedding 必须」与准入页「额外的 Embedding 服务为可选」说法矛盾，需统一。
-      2026-11-15 首次启动走查还发现应用内没有把「内容包 → 添加 API → 建角色」串起来的地方：
-      空 API 页先显示用不上的 RPM 限额卡；「添加 API」弹窗唯一的模板按钮是正文润色用的
-      DeepSeek 前缀续写模板，不是主力配置；模型推荐只是文字、不能一键套用。
-      方向：随 README 重写一起做首次启动引导或首页「开始前的三步」清单
-      （即 `docs/reviews/2026-11-14-ui-ux-audit.md` §八「根子 1」）。
-      📌 2026-11-20：README 一半已完成 —— 「首次游玩」一节已对照现版本应用重写，并写明 Embedding
-      为可选；应用内首次上手引导仍未做。
+- [ ] **API 配置页的三处首次上手摩擦** —— 2026-11-15 首次启动走查发现（`docs/reviews/2026-11-14-ui-ux-audit.md` §八「根子 1」）：
+      ① 空 API 页先显示用不上的 RPM 限额卡；② 「添加 API」弹窗唯一的模板按钮是正文润色用的
+      DeepSeek 前缀续写模板，不是主力配置；③ 模型推荐只是文字、不能一键套用。
+      📌 2026-11-27：本条原为「重写 README『首次游玩配置』并补应用内首次上手路径」，前两半已完成 ——
+      README「首次游玩」2026-11-20 已重写（Embedding 写明可选）；首页「开始前的三步」引导
+      （`src/ui/lib/onboarding.ts` + `home/HomeOnboarding.vue`，分支 `fix/beta-prep-l1-l6-onboarding`）已把
+      「内容包 → 添加 API → 新建存档」串起来，记录见 `docs/CHANGELOG.md`。只剩上面 API 页这三处。
 
 - [ ] **Characters v1 与提示词集成** —— 对齐正式提示词／预设与角色系统 v1 的结构化更新、初始经历和重要度规则。参考 `docs/reference/character-system.md`。
 

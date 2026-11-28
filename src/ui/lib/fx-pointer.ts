@@ -2,7 +2,9 @@
  * fx-pointer.ts — 特效层的指针源与视差
  *
  * - 全应用**至多一个** `pointermove` 监听（window、passive），第一个订阅者到来时才挂，
- *   最后一个走了就摘；只在 `(hover: hover)` 设备上挂（触屏没有悬停指针，视差无意义）。
+ *   最后一个走了就摘；只在 `(any-hover: hover)` 设备上挂（纯触屏没有悬停指针，视差无意义）。
+ *   读 any-hover 而非 hover：触屏笔记本 / 接了鼠标的平板主输入是触摸，`(hover: hover)` 为假，
+ *   但鼠标照样能悬停；同理监听里丢弃 `pointerType === 'touch'` 的移动（手指拖动不算悬停）。
  * - `registerParallax(el, depthPx)`：元素按指针相对视口中心的偏移反向平移至多 `depthPx`，
  *   经 fx-ticker 合帧平滑逼近；**收敛后不再排帧**（指针不动 = 零 rAF 开销）。
  *   只写该元素自己的内联 `transform: translate3d()` —— 🔴 永远不要每帧往 html/body 写 CSS 变量，
@@ -23,7 +25,7 @@ type PointerCallback = (p: FxPointer) => void;
 export interface PointerHubOptions {
   /** 监听目标，缺省 window */
   target?: Pick<Window, 'addEventListener' | 'removeEventListener' | 'innerWidth' | 'innerHeight'>;
-  /** 是否为可悬停设备；缺省读 `matchMedia('(hover: hover)')` */
+  /** 是否有任一可悬停的输入；缺省读 `matchMedia('(any-hover: hover)')` */
   canHover?: () => boolean;
   requestFrame?: (cb: FrameCallback) => () => void;
 }
@@ -43,7 +45,7 @@ const SETTLE_EPSILON = 0.05;
 function defaultCanHover(): boolean {
   if (typeof matchMedia !== 'function') return false;
   try {
-    return matchMedia('(hover: hover)').matches;
+    return matchMedia('(any-hover: hover)').matches;
   } catch {
     return false;
   }
@@ -63,6 +65,8 @@ export function createPointerHub(options: PointerHubOptions = {}): PointerHub {
 
   function onMove(ev: Event): void {
     const e = ev as PointerEvent;
+    // 混合输入设备上手指拖动也会发 pointermove：触摸不是悬停，不派发
+    if (e.pointerType === 'touch') return;
     const t = listenTarget;
     if (!t) return;
     const w = t.innerWidth || 1;
